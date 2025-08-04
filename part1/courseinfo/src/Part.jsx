@@ -1,6 +1,6 @@
 import React from 'react'
 
-function Part(part, exercises) {
+function Part({part, exercises}) {
 
   return (
     <>
