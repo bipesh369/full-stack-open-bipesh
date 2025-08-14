@@ -1,6 +1,7 @@
 const express = require('express');
 const morgan = require('morgan');
 const cors = require('cors');
+const path = require('path');
 
 const app = express();
 
@@ -9,8 +10,12 @@ app.use(express.json());
 app.use(cors());
 
 // Morgan setup for logging
-morgan.token('body', (req) => (req.method === 'POST' ? JSON.stringify(req.body) : ''));
-app.use(morgan(':method :url :status :res[content-length] - :response-time ms :body'));
+morgan.token('body', (req) =>
+  req.method === 'POST' ? JSON.stringify(req.body) : ''
+);
+app.use(
+  morgan(':method :url :status :res[content-length] - :response-time ms :body')
+);
 
 // Sample phonebook data
 let persons = [
@@ -20,17 +25,11 @@ let persons = [
   { id: '4', name: 'Mary Poppendieck', number: '39-23-6423122' },
 ];
 
-// Routes
-app.get('/', (req, res) => {
-  res.send('Welcome to the Phonebook App');
-});
-
-// Get all persons
+// API Routes
 app.get('/api/persons', (req, res) => {
   res.json(persons);
 });
 
-// Info page
 app.get('/info', (req, res) => {
   const date = new Date();
   res.send(`
@@ -39,7 +38,6 @@ app.get('/info', (req, res) => {
   `);
 });
 
-// Get a person by ID
 app.get('/api/persons/:id', (req, res) => {
   const person = persons.find((p) => p.id === req.params.id);
   if (!person) {
@@ -48,7 +46,6 @@ app.get('/api/persons/:id', (req, res) => {
   res.json(person);
 });
 
-// Delete a person
 app.delete('/api/persons/:id', (req, res) => {
   const id = req.params.id;
   const exists = persons.some((p) => p.id === id);
@@ -58,10 +55,9 @@ app.delete('/api/persons/:id', (req, res) => {
   }
 
   persons = persons.filter((p) => p.id !== id);
-  res.status(202).end();
+  res.status(204).end();
 });
 
-// Add a new person
 app.post('/api/persons', (req, res) => {
   const { name, number } = req.body;
 
@@ -83,8 +79,18 @@ app.post('/api/persons', (req, res) => {
   res.status(201).json(newPerson);
 });
 
+// Serve frontend build
+app.use(express.static(path.join(__dirname, '../frontend-phonebook/dist')));
+
+// Serve index.html for all other routes (so React routing works)
+app.get('*', (req, res) => {
+  res.sendFile(
+    path.resolve(__dirname, '../frontend-phonebook/dist', 'index.html')
+  );
+});
+
 // Start server
-const PORT = 3001;
+const PORT = process.env.PORT || 3001;
 app.listen(PORT, () => {
   console.log(`Server running on port ${PORT}`);
 });
