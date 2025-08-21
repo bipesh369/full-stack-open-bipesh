@@ -1,105 +1,160 @@
 require('dotenv').config();
+
 const express = require('express');
 const morgan = require('morgan');
 const cors = require('cors');
 const path = require('path');
-const person = require('./models/phonebook');
+const Person = require('./models/phonebook'); // Changed from Persons to Person
 
-const app = express();
+const app = express(); // Changed from server to app (more conventional)
 
 // Middleware
 app.use(express.json());
+app.use(express.static('dist'));
 app.use(cors());
 
-// Morgan setup for logging POST body
-morgan.token('body', (req) =>
-  req.method === 'POST' ? JSON.stringify(req.body) : ''
-);
+// Morgan logging with custom body token
+morgan.token('body', (req) => {
+  return req.method === 'POST' ? JSON.stringify(req.body) : '';
+});
 app.use(
   morgan(':method :url :status :res[content-length] - :response-time ms :body')
 );
 
-// API Routes
+// Root
+app.get('/', (req, res) => {
+  res.send('Welcome to the Phone Book App');
+});
 
 // Get all persons
 app.get('/api/persons', (req, res, next) => {
-  person.find({})
-    .then(result => res.json(result))
-    .catch(next);
+  Person.find({})
+    .then((result) => res.json(result))
+    .catch((err) => next(err));
 });
 
-// Info route
+// Info page
 app.get('/info', (req, res, next) => {
-  const date = new Date();
-  person.countDocuments({})
-    .then(count => {
-      res.send(`
-        <h1>Phonebook has info for ${count} people</h1>
-        <h2>${date}</h2>
-      `);
+  const now = new Date();
+  Person.countDocuments({})
+    .then((count) => {
+      res.send(
+        `<h1>Phonebook has info for ${count} people.</h1><h2>${now}</h2>`
+      );
     })
-    .catch(next);
+    .catch((err) => next(err));
 });
 
 // Get person by ID
 app.get('/api/persons/:id', (req, res, next) => {
-  person.findById(req.params.id)
-    .then(result => {
-      if (result) res.json(result);
-      else res.status(404).end();
+  Person.findById(req.params.id)
+    .then((person) => {
+      if (!person) {
+        return res.status(404).json({ error: 'Person not found' });
+      }
+      res.json(person);
     })
-    .catch(next);
+    .catch((err) => next(err));
 });
 
-// Delete person by ID
+// Delete person
 app.delete('/api/persons/:id', (req, res, next) => {
-  person.findByIdAndDelete(req.params.id)
-    .then(result => {
-      if (result) res.json(result);
-      else res.status(404).end();
+  const id = req.params.id;
+  console.log(`Deleting person with ID: ${id}`);
+  
+  Person.findByIdAndDelete(id)
+    .then((result) => {
+      if (!result) {
+        return res.status(404).json({ error: 'Person not found' });
+      }
+      res.status(204).end();
     })
-    .catch(next);
+    .catch((err) => next(err));
 });
 
-// Add new person
+// Add person
 app.post('/api/persons', (req, res, next) => {
-  const body = req.body;
+  const { name, number } = req.body;
 
-  if (!body.name || !body.number) {
+  // Basic validation (Mongoose schema will handle detailed validation)
+  if (!name || !number) {
     return res.status(400).json({ error: 'Name and number are required' });
   }
 
-  const newPerson = new person({
-    name: body.name,
-    number: body.number,
-  });
+  // Check for duplicate names
+  Person.findOne({ name })
+    .then(existingPerson => {
+      if (existingPerson) {
+        return res.status(400).json({ error: 'Name must be unique' });
+      }
 
-  newPerson.save()
-    .then(result => res.json(result))
-    .catch(next);
+      const person = new Person({
+        name: name.trim(),
+        number: number.trim()
+      });
+
+      return person.save();
+    })
+    .then(savedPerson => {
+      if (savedPerson) {
+        res.status(201).json(savedPerson);
+      }
+    })
+    .catch(error => next(error));
 });
 
-// Serve frontend build
-app.use(express.static(path.join(__dirname, '../frontend-phonebook/dist')));
+// Update person
+app.put('/api/persons/:id', (req, res, next) => {
+  const { name, number } = req.body;
 
-// Serve index.html for all other routes (React routing)
-app.get('*', (req, res) => {
-  res.sendFile(
-    path.resolve(__dirname, '../frontend-phonebook/dist', 'index.html')
-  );
-});
-
-// Error handler
-app.use((error, req, res, next) => {
-  console.error(error.message);
-  if (error.name === 'CastError') {
-    return res.status(400).send({ error: 'Malformed ID' });
+  // Validate request
+  if (!name || !number) {
+    return res.status(400).json({ error: 'Name and number are required' });
   }
-  res.status(500).send({ error: 'Something went wrong' });
+
+  const personData = {
+    name: name.trim(),
+    number: number.trim()
+  };
+
+  // Update the person
+  Person.findByIdAndUpdate(
+    req.params.id,
+    personData,
+    { new: true, runValidators: true, context: 'query' }
+  )
+    .then(updatedPerson => {
+      if (!updatedPerson) {
+        return res.status(404).json({ error: 'Person not found' });
+      }
+      res.json(updatedPerson);
+    })
+    .catch(err => next(err));
 });
 
-// Start server
+// Fallback for SPA
+app.get('*', (req, res) => {
+  res.sendFile(path.join(__dirname, 'dist', 'index.html'));
+});
+
+// Error handling middleware
+app.use((error, req, res, ) => {
+  console.error('Error details:', error.message);
+
+  if (error.name === 'CastError') {
+    return res.status(400).json({ error: 'Invalid ID format' });
+  } 
+  else if (error.name === 'ValidationError') {
+    return res.status(400).json({ error: error.message });
+  }
+  else if (error.code === 11000) {
+    return res.status(400).json({ error: 'Name must be unique' });
+  }
+
+  res.status(500).json({ error: 'Internal server error' });
+});
+
 const PORT = process.env.PORT || 3001;
 app.listen(PORT, () => {
-  console.log(`Server running on port ${PORT}`);
+  console.log(` Server running on port ${PORT}`);
 });
